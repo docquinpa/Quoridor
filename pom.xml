@@ -1,0 +1,87 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+
+	<modelVersion>4.0.0</modelVersion>
+
+	<groupId>fr.univrouen</groupId>
+	<artifactId>quoridor</artifactId>
+	<version>1.0-SNAPSHOT</version>
+	<packaging>jar</packaging>
+
+	<name>quoridor</name>
+
+	<!-- Java 25 -->
+	<properties>
+		<maven.compiler.source>25</maven.compiler.source>
+		<maven.compiler.target>25</maven.compiler.target>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<javafx.version>23.0.1</javafx.version>
+	</properties>
+
+	<dependencies>
+
+		<!-- JavaFX -->
+		<dependency>
+			<groupId>org.openjfx</groupId>
+			<artifactId>javafx-controls</artifactId>
+			<version>${javafx.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.openjfx</groupId>
+			<artifactId>javafx-graphics</artifactId>
+			<version>${javafx.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.openjfx</groupId>
+			<artifactId>javafx-base</artifactId>
+			<version>${javafx.version}</version>
+		</dependency>
+
+		<!-- Import OBJ -->
+		<dependency>
+			<groupId>org.fxyz3d</groupId>
+			<artifactId>fxyz3d</artifactId>
+			<version>0.6.0</version>
+		</dependency>
+
+		<dependency>
+		    <groupId>org.fxyz3d</groupId>
+		    <artifactId>fxyz3d-importers</artifactId>
+		    <version>0.6.0</version>
+		</dependency>
+
+		<dependency>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter</artifactId>
+			<version>5.10.0</version>
+			<scope>test</scope>
+		</dependency>
+
+	</dependencies>
+	
+	<pluginRepositories>
+	    <pluginRepository>
+	        <id>ossrh</id>
+	        <url>https://s01.oss.sonatype.org/content/repositories/releases/</url>
+	    </pluginRepository>
+	</pluginRepositories>
+
+
+	<build>
+		<plugins>
+
+			<!-- Plugin JavaFX -->
+			<plugin>
+				<groupId>org.openjfx</groupId>
+				<artifactId>javafx-maven-plugin</artifactId>
+				<version>0.0.8</version>
+				<configuration>
+					<mainClass>fr.univrouen.QuoridorApp</mainClass>
+				</configuration>
+			</plugin>
+
+		</plugins>
+	</build>
+
+</project>

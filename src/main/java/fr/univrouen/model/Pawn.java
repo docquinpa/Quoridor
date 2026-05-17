@@ -62,4 +62,11 @@ public interface Pawn {
      * @postcondition aucun changement d'état
      */
     boolean goalReachedAt(int tx, int tz);
+
+    /**
+     * Retourne l'objectif de victoire de ce pawn.
+     * @return l'objectif associé
+     * @postcondition aucun changement d'état
+     */
+    Goal getGoal();
 }

@@ -22,6 +22,26 @@ public class StdBoard implements Board {
         this.wallH = new boolean[size][size-1];
     }
 
+    public StdBoard(StdBoard other) {
+        this.size = other.size;
+        this.wallV = new boolean[size-1][size];
+        this.wallH = new boolean[size][size-1];
+
+        for (int x = 0; x < wallV.length; x++) {
+            System.arraycopy(other.wallV[x], 0, wallV[x], 0, wallV[x].length);
+        }
+        for (int x = 0; x < wallH.length; x++) {
+            System.arraycopy(other.wallH[x], 0, wallH[x], 0, wallH[x].length);
+        }
+
+        for (Pawn p : other.pawns.values()) {
+            Pawn clone = new StdPawn(p.getId(), p.getX(), p.getZ(), p.getGoal());
+            pawns.put(clone.getId(), clone);
+        }
+        wallsRemaining.putAll(other.wallsRemaining);
+        actionTakenThisTurn = other.actionTakenThisTurn;
+    }
+
     @Override
     public int getSize() { return size; }
 
@@ -35,6 +55,11 @@ public class StdBoard implements Board {
 
     @Override
     public Pawn getPawn(String id) { return pawns.get(id); }
+
+    @Override
+    public Map<String, Pawn> getPawns() {
+        return new HashMap<>(pawns);
+    }
 
     @Override
     public boolean isOccupied(int x, int z) {
@@ -59,7 +84,7 @@ public class StdBoard implements Board {
 
         // orthogonal adjacent
         if (Math.abs(dx) + Math.abs(dz) == 1) {
-            if (isBlocked(x, z, toX, toZ)) return false;
+            if (isBlockedBetween(x, z, toX, toZ)) return false;
             return !isOccupied(toX, toZ);
         }
 
@@ -69,32 +94,36 @@ public class StdBoard implements Board {
             int midZ = z + Integer.signum(dz);
             if (!isOccupied(midX, midZ)) return false;
             // both steps must not be blocked by walls
-            if (isBlocked(x, z, midX, midZ)) return false;
-            if (isBlocked(midX, midZ, toX, toZ)) return false;
+            if (isBlockedBetween(x, z, midX, midZ)) return false;
+            if (isBlockedBetween(midX, midZ, toX, toZ)) return false;
             return !isOccupied(toX, toZ);
         }
 
-        // diagonal move: target is diagonal adjacent (dx and dz are both +-1)
+        // diagonal move: only allowed when a straight jump is blocked
         if (Math.abs(dx) == 1 && Math.abs(dz) == 1) {
-            // Need an adjacent pawn in one of the orthogonal neighbors blocking straight jump
-            // Two possibilities: pawn at (x+dx, z) blocking east/west jump, or pawn at (x, z+dz) blocking north/south jump
-            int neigh1x = x + Integer.signum(dx);
-            int neigh1z = z;
-            int neigh2x = x;
-            int neigh2z = z + Integer.signum(dz);
+            if (isOccupied(toX, toZ)) return false;
 
-            // If there is a pawn at neigh1 and moving straight over neigh1 is blocked, allow diagonal to (x+dx,z+dz) if path from neigh1 to target is not blocked
-            if (isWithin(neigh1x, neigh1z) && isOccupied(neigh1x, neigh1z)) {
-                // check origin -> neigh1 not blocked
-                if (!isBlocked(x, z, neigh1x, neigh1z)) {
-                    // check neigh1 -> target not blocked
-                    if (!isBlocked(neigh1x, neigh1z, toX, toZ) && !isOccupied(toX, toZ)) return true;
+            int adjX = x + dx;
+            int adjZ = z;
+            if (isWithin(adjX, adjZ) && isOccupied(adjX, adjZ)) {
+                if (!isBlockedBetween(x, z, adjX, adjZ)) {
+                    int jumpX = x + 2 * dx;
+                    int jumpZ = z;
+                    if (isJumpBlocked(adjX, adjZ, jumpX, jumpZ) && !isBlockedBetween(adjX, adjZ, toX, toZ)) {
+                        return true;
+                    }
                 }
             }
 
-            if (isWithin(neigh2x, neigh2z) && isOccupied(neigh2x, neigh2z)) {
-                if (!isBlocked(x, z, neigh2x, neigh2z)) {
-                    if (!isBlocked(neigh2x, neigh2z, toX, toZ) && !isOccupied(toX, toZ)) return true;
+            int adj2X = x;
+            int adj2Z = z + dz;
+            if (isWithin(adj2X, adj2Z) && isOccupied(adj2X, adj2Z)) {
+                if (!isBlockedBetween(x, z, adj2X, adj2Z)) {
+                    int jumpX = x;
+                    int jumpZ = z + 2 * dz;
+                    if (isJumpBlocked(adj2X, adj2Z, jumpX, jumpZ) && !isBlockedBetween(adj2X, adj2Z, toX, toZ)) {
+                        return true;
+                    }
                 }
             }
         }
@@ -109,7 +138,8 @@ public class StdBoard implements Board {
         p.setPos(toX, toZ);
     }
 
-    private boolean isBlocked(int x1,int z1,int x2,int z2) {
+    @Override
+    public boolean isBlockedBetween(int x1,int z1,int x2,int z2) {
         // assume adjacent
         if (x2==x1+1 && z2==z1) { // east
             if (x1 >= size-1) return true;
@@ -130,8 +160,20 @@ public class StdBoard implements Board {
         return true; // non-adjacent default blocked
     }
 
+    @Override
+    public boolean hasWall(int x, int z, Orientation orientation) {
+        if (!isWallAnchorInBounds(x, z)) return false;
+        return hasWallAnchor(x, z, orientation);
+    }
+
     private boolean isWithin(int x,int z) {
         return x >= 0 && x < size && z >= 0 && z < size;
+    }
+
+    private boolean isJumpBlocked(int adjX, int adjZ, int jumpX, int jumpZ) {
+        if (!isWithin(jumpX, jumpZ)) return true;
+        if (isBlockedBetween(adjX, adjZ, jumpX, jumpZ)) return true;
+        return isOccupied(jumpX, jumpZ);
     }
 
     // Check which pawn (if any) has reached their goal
@@ -178,16 +220,14 @@ public class StdBoard implements Board {
         if (!wallsRemaining.containsKey(playerId)) return false;
         int remaining = wallsRemaining.get(playerId);
         if (remaining <= 0) return false;
+        if (orientation == null) return false;
+        if (!canPlaceWallSegments(x, z, orientation)) return false;
 
-        boolean[][] walls = (orientation == Orientation.HORIZONTAL) ? wallH : wallV;
-        int maxIdx = (orientation == Orientation.HORIZONTAL) ? size : size - 1;
-        int maxPos = (orientation == Orientation.HORIZONTAL) ? size - 1 : size;
+        StdBoard copy = this.copy();
+        copy.placeWallSegments(x, z, orientation);
+        if (!copy.allPlayersHavePath()) return false;
 
-        if (x < 0 || x >= maxIdx || z < 0 || z >= maxPos) return false;
-        if (walls[x][z]) return false;
-
-        // Place wall and decrement
-        walls[x][z] = true;
+        placeWallSegments(x, z, orientation);
         wallsRemaining.put(playerId, remaining - 1);
         return true;
     }
@@ -200,5 +240,54 @@ public class StdBoard implements Board {
     @Override
     public Map<String, Integer> getWallsRemainingMap() {
         return new HashMap<>(wallsRemaining);
+    }
+
+    private boolean isWallAnchorInBounds(int x, int z) {
+        return x >= 0 && z >= 0 && x < size - 1 && z < size - 1;
+    }
+
+    private boolean hasWallAnchor(int x, int z, Orientation orientation) {
+        if (!isWallAnchorInBounds(x, z)) return false;
+        if (orientation == Orientation.HORIZONTAL) {
+            return wallH[x][z] && wallH[x + 1][z];
+        }
+        return wallV[x][z] && wallV[x][z + 1];
+    }
+
+    private boolean canPlaceWallSegments(int x, int z, Orientation orientation) {
+        if (!isWallAnchorInBounds(x, z)) return false;
+
+        if (orientation == Orientation.HORIZONTAL) {
+            if (wallH[x][z] || wallH[x + 1][z]) return false;
+            if (hasWallAnchor(x, z, Orientation.VERTICAL)) return false;
+        } else {
+            if (wallV[x][z] || wallV[x][z + 1]) return false;
+            if (hasWallAnchor(x, z, Orientation.HORIZONTAL)) return false;
+        }
+
+        return true;
+    }
+
+    private void placeWallSegments(int x, int z, Orientation orientation) {
+        if (orientation == Orientation.HORIZONTAL) {
+            wallH[x][z] = true;
+            wallH[x + 1][z] = true;
+        } else {
+            wallV[x][z] = true;
+            wallV[x][z + 1] = true;
+        }
+    }
+
+    private boolean allPlayersHavePath() {
+        for (Pawn pawn : pawns.values()) {
+            if (Pathfinding.shortestPathLength(this, pawn) == Integer.MAX_VALUE) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public StdBoard copy() {
+        return new StdBoard(this);
     }
 }

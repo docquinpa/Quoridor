@@ -1,0 +1,1 @@
+packageSearchIndex = [{"l":"All Packages","u":"allpackages-index.html","k":"18"},{"l":"fr.univrouen.ai"},{"l":"fr.univrouen.controller"},{"l":"fr.univrouen.model"},{"l":"fr.univrouen.replay"},{"l":"fr.univrouen.view"}];updateSearchResults();

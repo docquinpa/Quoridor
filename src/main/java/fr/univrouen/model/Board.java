@@ -30,6 +30,13 @@ public interface Board {
      * @return le pawn correspondant, ou null s'il n'existe pas
      */
     Pawn getPawn(String id);
+
+    /**
+     * Retourne une copie de la map des pawns présents sur le plateau.
+     * @return une map [playerId -> pawn]
+     * @postcondition aucun changement d'état
+     */
+    Map<String, Pawn> getPawns();
     
     /**
      * Vérifie si une case est occupée par un pawn.
@@ -51,6 +58,16 @@ public interface Board {
      * @postcondition aucun changement d'état du plateau
      */
     boolean canMove(String pawnId, int toX, int toZ);
+
+    /**
+     * Vérifie si un mur bloque un déplacement entre deux cases adjacentes.
+     * @param x1 coordonnée X source
+     * @param z1 coordonnée Z source
+     * @param x2 coordonnée X destination (adjacente)
+     * @param z2 coordonnée Z destination (adjacente)
+     * @return true si un mur bloque le passage, false sinon
+     */
+    boolean isBlockedBetween(int x1, int z1, int x2, int z2);
     
     /**
      * Effectue un mouvement de pawn.
@@ -106,6 +123,15 @@ public interface Board {
      * @postcondition si true: le mur est placé et les murs restants sont décrémentés
      */
     boolean placeWallForPlayer(String playerId, int x, int z, Orientation orientation);
+
+    /**
+     * Vérifie si un mur existe à la position donnée.
+     * @param x la coordonnée X du mur
+     * @param z la coordonnée Z du mur
+     * @param orientation l'orientation du mur
+     * @return true si un mur est présent, false sinon
+     */
+    boolean hasWall(int x, int z, Orientation orientation);
     
     /**
      * Retourne le nombre de murs restants pour un joueur.

@@ -38,4 +38,9 @@ public class StdPawn implements Pawn {
     public boolean goalReachedAt(int tx, int tz) {
         return goal.reached(tx, tz);
     }
+
+    @Override
+    public Goal getGoal() {
+        return goal;
+    }
 }

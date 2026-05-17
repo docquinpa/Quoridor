@@ -2,8 +2,11 @@ package fr.univrouen.view;
 
 import fr.univrouen.model.Board;
 import fr.univrouen.model.Orientation;
+import fr.univrouen.model.StdBoard;
 import fr.univrouen.controller.GameController;
 import fr.univrouen.controller.GameController.GameListener;
+import javafx.animation.Interpolator;
+import javafx.animation.ScaleTransition;
 import javafx.scene.Group;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.Node;
@@ -12,10 +15,13 @@ import javafx.scene.paint.PhongMaterial;
 import javafx.scene.shape.Box;
 import javafx.scene.shape.CullFace;
 import javafx.scene.shape.MeshView;
+import javafx.util.Duration;
 import org.fxyz3d.importers.Importer3D;
 import org.fxyz3d.importers.Model3D;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -26,6 +32,7 @@ public class StdBoard3D extends Group implements Board3D {
     private final double cellSize;
     private final double yPos;
     private final double centerOffset;
+    private final Group boardModelGroup = new Group();
     private final Group interactiveGrid = new Group();
     private final Board boardModel;
     private final Map<String, Pawn3D> pawnViews = new HashMap<>();
@@ -35,7 +42,11 @@ public class StdBoard3D extends Group implements Board3D {
     private PhongMaterial hoverMat;
     private PhongMaterial idleMat;
     private PhongMaterial validMat;
+    private Wall3D wallPreview;
+    private Orientation previewOrientation;
+    private double pawnYOffset;
     private boolean actionTakenThisTurn = false;
+    private String boardModelPath;
 
     /**
      * Crée une vue 3D du plateau.
@@ -49,26 +60,31 @@ public class StdBoard3D extends Group implements Board3D {
         this.cellSize = cellSize;
         this.yPos = yPos;
         this.centerOffset = (9 * cellSize) / 2.0 - (cellSize / 2.0);
+        this.pawnYOffset = cellSize * 0.1;
         this.controller = controller;
         this.boardModel = controller.getModel();
 
-        // Chargement du modèle
-        Model3D model = Importer3D.load(getClass().getResource(modelPath));
-        for (Node node : model.getMeshViews()) {
-            if (node instanceof MeshView) ((MeshView) node).setCullFace(CullFace.NONE);
-            this.getChildren().add(node);
-        }
-        
+        this.boardModelPath = modelPath;
+        loadBoardModel(modelPath);
+        this.getChildren().add(boardModelGroup);
+
         createGrid();
         this.getChildren().add(interactiveGrid);
 
-        // Add lights attached to the board for better visibility
-        javafx.scene.PointLight pl = new javafx.scene.PointLight(Color.rgb(255,255,255));
-        pl.setTranslateY(yPos + 200);
-        pl.setTranslateZ(-500);
-        pl.setTranslateX(0);
-        this.getChildren().add(pl);
-        this.getChildren().add(new javafx.scene.AmbientLight(Color.rgb(100,100,100)));
+        // Subtle chess-like lighting: warm key and soft rim light
+        javafx.scene.PointLight key = new javafx.scene.PointLight(Color.rgb(255, 244, 214));
+        key.setTranslateY(yPos + 260);
+        key.setTranslateZ(-560);
+        key.setTranslateX(-180);
+
+        javafx.scene.PointLight rim = new javafx.scene.PointLight(Color.rgb(200, 210, 230));
+        rim.setTranslateY(yPos + 140);
+        rim.setTranslateZ(420);
+        rim.setTranslateX(220);
+
+        this.getChildren().add(key);
+        this.getChildren().add(rim);
+        this.getChildren().add(new javafx.scene.AmbientLight(Color.rgb(90, 90, 90)));
 
         // spawn two pawns (opponents) at opposite sides: p1 (top) and p2 (bottom)
         // Utilise la Factory pour créer les pawns (respecte SOLID)
@@ -85,9 +101,11 @@ public class StdBoard3D extends Group implements Board3D {
             @Override public void onTurnChanged(String currentPlayerId) { /* UI listens externally */ }
             @Override public void onPawnMoved(String pawnId, int x, int z) {
                 Pawn3D p = pawnViews.get(pawnId);
-                if (p != null) p.updatePosition(logicToPx(x), yPos + 35, logicToPz(z), x, z);
+                if (p != null) p.animateTo(logicToPx(x), pawnY(), logicToPz(z), x, z);
             }
-            @Override public void onWallPlaced(int x, int z, Orientation orientation) { /* view already spawns wall on placement */ }
+            @Override public void onWallPlaced(int x, int z, Orientation orientation) {
+                spawnWallView(x, z, orientation);
+            }
             @Override public void onPlayerRegistered(String playerId) { /* no-op */ }
             @Override public void onGameWon(String winnerPlayerId) {
                 System.out.println("=== GAME WON ===");
@@ -118,14 +136,63 @@ public class StdBoard3D extends Group implements Board3D {
                 cell.setMaterial(idleMat);
 
                 final int fx = x; final int fz = z;
-                cell.setOnMouseEntered(e -> cell.setMaterial(hoverMat));
-                cell.setOnMouseExited(e -> { if (!isValidHighlighted(fx,fz)) cell.setMaterial(idleMat); });
+                cell.setOnMouseEntered(e -> {
+                    cell.setMaterial(hoverMat);
+                    handleWallPreview(fx, fz, e);
+                });
+                cell.setOnMouseMoved(e -> handleWallPreview(fx, fz, e));
+                cell.setOnMouseExited(e -> {
+                    if (!isValidHighlighted(fx,fz)) cell.setMaterial(idleMat);
+                    if (!e.isShiftDown() && !e.isControlDown()) hideWallPreview();
+                });
                 cell.setOnMouseClicked(e -> onCellClick(fx, fz, px, pz, e));
 
                 interactiveGrid.getChildren().add(cell);
                 gridBoxes[x][z] = cell;
             }
         }
+    }
+
+    private void loadBoardModel(String modelPath) throws Exception {
+        List<Node> nodes = loadBoardMeshNodes(modelPath);
+        boardModelGroup.getChildren().setAll(nodes);
+    }
+
+    private List<Node> loadBoardMeshNodes(String modelPath) throws Exception {
+        Model3D model = Importer3D.load(getClass().getResource(modelPath));
+        List<Node> nodes = new ArrayList<>();
+        for (Node node : model.getMeshViews()) {
+            if (node instanceof MeshView) {
+                ((MeshView) node).setCullFace(CullFace.NONE);
+            }
+            nodes.add(node);
+        }
+        return nodes;
+    }
+
+    public boolean applyBoardSkin(String modelPath) {
+        if (modelPath == null || modelPath.isBlank()) return false;
+        if (modelPath.equals(boardModelPath)) return true;
+        if (getClass().getResource(modelPath) == null) {
+            System.out.println("Board skin not found: " + modelPath);
+            return false;
+        }
+        try {
+            List<Node> nodes = loadBoardMeshNodes(modelPath);
+            boardModelGroup.getChildren().setAll(nodes);
+            boardModelPath = modelPath;
+            return true;
+        } catch (Exception ex) {
+            System.out.println("Failed to load board skin: " + modelPath + " -> " + ex.getMessage());
+            return false;
+        }
+    }
+
+    public boolean applyPawnSkin(String pawnId, String modelPath, double scale, double yOffset) {
+        if (pawnId == null || pawnId.isBlank()) return false;
+        Pawn3D pawn = pawnViews.get(pawnId);
+        if (pawn == null) return false;
+        return pawn.applyModel(modelPath, scale, yOffset);
     }
 
     private boolean isValidHighlighted(int x,int z) {
@@ -142,8 +209,8 @@ public class StdBoard3D extends Group implements Board3D {
             boolean ok = false;
             if (evt.isShiftDown()) ok = controller.placeWall(cur, lx, lz, Orientation.HORIZONTAL);
             if (evt.isControlDown()) ok = controller.placeWall(cur, lx, lz, Orientation.VERTICAL);
-            if (ok) spawnWallView(lx, lz, evt.isShiftDown() ? Orientation.HORIZONTAL : Orientation.VERTICAL);
-            else System.out.println("Wall placement refused (overlap, crossing, isolation, or no walls left)");
+            if (!ok) System.out.println("Wall placement refused (overlap, crossing, isolation, or no walls left)");
+            hideWallPreview();
             return;
         }
 
@@ -172,12 +239,7 @@ public class StdBoard3D extends Group implements Board3D {
         if (selectedPawnId != null) {
             if (controller.movePawn(selectedPawnId, lx, lz)) {
                 Pawn3D view = pawnViews.get(selectedPawnId);
-                if (view != null) {
-                    double nx = logicToPx(lx);
-                    double nz = logicToPz(lz);
-                    view.updatePosition(nx, yPos + 35, nz, lx, lz);
-                    view.setSelected(false);
-                }
+                if (view != null) view.setSelected(false);
                 selectedPawnId = null;
                 clearValidHighlights();
             } else {
@@ -252,7 +314,7 @@ public class StdBoard3D extends Group implements Board3D {
     @Override
     public void spawnPawn(double px, double pz, Color color) {
         Pawn3D p = new Pawn3D(color, 12);
-        p.updatePosition(px, yPos + 35, pz, 0, 0);
+        p.updatePosition(px, pawnY(), pz, 0, 0);
         this.getChildren().add(p);
     }
 
@@ -261,7 +323,7 @@ public class StdBoard3D extends Group implements Board3D {
         double pz = logicToPz(pm.getZ());
         Pawn3D p = new Pawn3D(color, 12);
         p.setPawnId(pm.getId());
-        p.updatePosition(px, yPos + 35, pz, pm.getX(), pm.getZ());
+        p.updatePosition(px, pawnY(), pz, pm.getX(), pm.getZ());
         // allow clicking the pawn directly
         final String pid = pm.getId();
         p.setOnMouseClicked((MouseEvent e) -> {
@@ -277,20 +339,28 @@ public class StdBoard3D extends Group implements Board3D {
         double centerX = logicToPx(x) + cellSize/2.0;
         double centerZ = logicToPz(z) + cellSize/2.0;
         double wallHeight = 10;
+        double wallSpan = cellSize * 2.0;
+        double wallThickness = 6;
         Wall3D w;
         if (orientation == Orientation.HORIZONTAL) {
-            double wWidth = cellSize * 2 + 8;
-            double wDepth = 6;
-            w = new Wall3D(wWidth, wallHeight, wDepth, Color.DARKRED);
+            w = new Wall3D(wallSpan, wallHeight, wallThickness, Color.DARKRED);
         } else {
-            double wWidth = 6;
-            double wDepth = cellSize * 2 + 8;
-            w = new Wall3D(wWidth, wallHeight, wDepth, Color.DARKRED);
+            w = new Wall3D(wallThickness, wallHeight, wallSpan, Color.DARKRED);
         }
         w.setTranslateX(centerX);
         w.setTranslateZ(centerZ);
         w.setTranslateY(yPos - 4);
         this.getChildren().add(w);
+
+        w.setScaleX(0.2);
+        w.setScaleY(0.2);
+        w.setScaleZ(0.2);
+        ScaleTransition scale = new ScaleTransition(Duration.millis(180), w);
+        scale.setInterpolator(Interpolator.EASE_OUT);
+        scale.setToX(1);
+        scale.setToY(1);
+        scale.setToZ(1);
+        scale.play();
     }
 
     private double logicToPx(int lx) {
@@ -301,11 +371,76 @@ public class StdBoard3D extends Group implements Board3D {
         return lz * cellSize - centerOffset;
     }
 
+    private double pawnY() {
+        return yPos + pawnYOffset;
+    }
+
     private String findPawnIdAt(int lx, int lz) {
         for (Map.Entry<String, Pawn3D> e : pawnViews.entrySet()) {
             Pawn3D p = e.getValue();
             if (p.getLogicX() == lx && p.getLogicZ() == lz) return e.getKey();
         }
         return null;
+    }
+
+    private void handleWallPreview(int lx, int lz, MouseEvent evt) {
+        if (!evt.isShiftDown() && !evt.isControlDown()) {
+            hideWallPreview();
+            return;
+        }
+        Orientation orientation = evt.isShiftDown() ? Orientation.HORIZONTAL : Orientation.VERTICAL;
+        boolean valid = canPreviewWall(lx, lz, orientation);
+        showWallPreview(lx, lz, orientation, valid);
+    }
+
+    private boolean canPreviewWall(int lx, int lz, Orientation orientation) {
+        String cur = controller.getCurrentPlayerId();
+        if (cur == null) return false;
+        if (boardModel instanceof StdBoard board) {
+            StdBoard copy = board.copy();
+            return copy.placeWallForPlayer(cur, lx, lz, orientation);
+        }
+        return false;
+    }
+
+    private void showWallPreview(int x, int z, Orientation orientation, boolean valid) {
+        if (wallPreview == null || previewOrientation != orientation) {
+            if (wallPreview != null) this.getChildren().remove(wallPreview);
+            wallPreview = createPreviewWall(orientation);
+            previewOrientation = orientation;
+            this.getChildren().add(wallPreview);
+        }
+
+        double centerX = logicToPx(x) + cellSize / 2.0;
+        double centerZ = logicToPz(z) + cellSize / 2.0;
+        wallPreview.setTranslateX(centerX);
+        wallPreview.setTranslateZ(centerZ);
+        wallPreview.setTranslateY(yPos - 4);
+
+        PhongMaterial material = new PhongMaterial(valid ? Color.rgb(84, 156, 115) : Color.rgb(168, 88, 76));
+        wallPreview.setMaterial(material);
+    }
+
+    private Wall3D createPreviewWall(Orientation orientation) {
+        double wallHeight = 10;
+        double wallSpan = cellSize * 2.0;
+        double wallThickness = 6;
+        Wall3D w;
+        if (orientation == Orientation.HORIZONTAL) {
+            w = new Wall3D(wallSpan, wallHeight, wallThickness, Color.rgb(84, 156, 115));
+        } else {
+            w = new Wall3D(wallThickness, wallHeight, wallSpan, Color.rgb(84, 156, 115));
+        }
+        w.setOpacity(0.65);
+        w.setMouseTransparent(true);
+        return w;
+    }
+
+    private void hideWallPreview() {
+        if (wallPreview != null) {
+            this.getChildren().remove(wallPreview);
+            wallPreview = null;
+            previewOrientation = null;
+        }
     }
 }
